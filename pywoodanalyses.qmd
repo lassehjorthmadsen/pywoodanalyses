@@ -1,0 +1,78 @@
+---
+title: "Quick look at data from pywood"
+author: "Lasse Hjorth Madsen"
+date: today
+execute:
+  echo: false
+  warning: false
+---
+
+```{r}
+library(tidyverse)
+library(purrr)
+library(DT)
+```
+
+```{r get_data}
+#| warning: false
+#| cache: true
+
+patterns <- c("stockoption_streams", "stockoption_snapshots", "option_spaces", "stock_")
+
+files <- list.files("~/Python-Projects/pywood/exploration/data/", pattern = paste0(patterns, collapse = "|"), full.names = T)
+
+files_split <- patterns |> 
+  map(grep, files) |> 
+  map(\(x) files[x])
+
+dfs <- files_split |> 
+  map(set_names) |> 
+  map(\(x) map_dfr(x, \(x) read_csv(x, show_col_types = FALSE), .id = "file")) |> 
+  map(mutate, file = basename(file)) |> 
+  map(select, -starts_with("..."))
+           
+
+streams <- dfs[[1]]
+snaps   <- dfs[[2]]
+spaces  <- dfs[[3]] |> distinct(Uic, .keep_all = TRUE)
+stocks  <- dfs[[4]]
+```
+
+## Why this?
+
+This is a quick look at the data on stock option harvested by `pywood`.
+
+## Questions
+
+### How many stock options do we have in the snapshots
+
+I.e. how many do we attempt to collect streaming prices for?
+
+
+```{r}
+snaps |> count(file) 
+```
+
+### How many stock options do we actually receive streaming data for?
+
+A lot fewer.
+
+```{r}
+streams |> group_by(file) |> summarise(`unique refids` = length(unique(refid)))
+```
+
+
+### What are the underlying stocks that generate streaming data?
+\
+
+```{r}
+#| column: page-right
+temp <- 
+  streams |> 
+  count(refid, file, name = "n_streams", sort = TRUE) |> 
+  left_join(spaces, by = c("refid" = "Uic")) 
+
+temp |> select(n_streams, Description, Exchange = Exchange.ExchangeId, Expiry, StrikePrice, PutCall) |>
+  datatable(rownames = FALSE)
+```
+
