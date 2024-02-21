@@ -1,2 +1,2 @@
 # pywoodanalyses
-Analysis of stock options data
+Analysis of stock options data.
