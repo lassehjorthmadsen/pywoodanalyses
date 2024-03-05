@@ -4,6 +4,6 @@
 .Ruserdata
 *.Rproj
 *.html
-/pywoodanalyses_cache/
-/pywoodanalyses_files/
+/*_cache/
+/*_files/
 /.quarto/
