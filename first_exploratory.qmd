@@ -25,7 +25,7 @@ theme_set(theme_minimal())
 #| warning: false
 #| cache: true
 
-patterns <- c("stockoption_streams", "stockoption_snapshots", "option_spaces", "stock_", "stockoption_[0-9]{8}", "moneyness_")
+patterns <- c("stockoption_streams", "stockoption_snapshots", "option_spaces", "stock_", "stockoption_.{10}", "moneyness_")
 
 files <- list.files("~/Python-Projects/pywood/exploration/data/", pattern = paste0(patterns, collapse = "|"), full.names = T)
 
@@ -38,7 +38,6 @@ dfs <- files_split |>
   map(\(x) map_dfr(x, \(x) read_csv(x, show_col_types = FALSE), .id = "file")) |> 
   map(mutate, file = basename(file)) |> 
   map(select, -starts_with("..."))
-   
 ```
 
 ```{r clean_data}
@@ -57,13 +56,13 @@ This is a quick look at the data on stock options harvested by `pywood`.
 
 ## Basics
 
-### How many stock options do we have in the snapshots
+### How many stock options do we have in the snapshots?
 
 I.e. how many do we attempt to collect streaming prices for? Each file listed below covers a number of stock options, picked and sampled from the large *option space* of 
 all stock options.
 
 ```{r}
-snaps |> count(file = file.x) 
+snaps |> count(file = file.x) |> arrange(desc(file))
 ```
 
 ### How many stock options do we actually receive streaming data for?
@@ -71,7 +70,12 @@ snaps |> count(file = file.x)
 A lot fewer. But funny enough, for some small samples (`stockoption_snapshots_23022024.csv`), apparently we got the most streams? Perhaps just due to luck -- hitting some popular options.
 
 ```{r}
-streams |> group_by(file = file.x) |> summarise(`unique refids` = length(unique(refid)))
+streams |> 
+  group_by(file = file.x) |> 
+  summarise(rows = n(),
+            `unique refids` = length(unique(refid)),
+            ratio = round(rows / `unique refids`, 1)) |> 
+  arrange(desc(file))
 ```
 
 ### Does the option identifier change?
@@ -90,7 +94,9 @@ dfs[[5]] |>
 Count of expiry dates: In the near future we see about one date per week. In the more distant future expiry dates are less dense.
 
 ```{r}
-spaces |> count(Expiry)
+spaces |> 
+  count(Expiry) |>
+  datatable(rownames = FALSE, options = list(dom = 'tp'))
 ```
 
 
@@ -343,7 +349,7 @@ streams |>
 ```
 
 
-### Do we see more trading when strike date is close?
+### Do we see more trading when expiry date is close?
 
 Yes, although this pattern could be due to me doing the data collection at specific dates. 
 
@@ -354,7 +360,7 @@ streams |>
   ggplot(aes(x = days_to_expiry, fill = PutCall)) +
   geom_density(color = NA, alpha = 0.5) +
   scale_x_continuous(breaks = seq(0, 150, 10)) +
-  labs(x = "Days between stream and expiry date", y = "Count",
+  labs(x = "Days between stream and expiry date", y = "Density",
        title = "Number of days between observed streaming price and expiry date",
        subtitle = "Stock options usually have a few expiry dates per month")
 ```
@@ -373,7 +379,7 @@ streams |>
 
 ### The curious case of Nvidia
 \
-It's interesting to note that NVidia, that generated a lot of [buzz](https://social.saxo/qyzxmuf?uuid=ZG94DEv) recently, also got a lot of stock option interest, as seen by the many streams we received. Exactly what variants of options got the attention? Apparently only call options with strike price 695. Here's the count of stream data we got from Nvidia-options:
+It's interesting to note that NVidia, that generated a lot of [buzz](https://social.saxo/qyzxmuf?uuid=ZG94DEv) recently, also got a lot of stock option interest, as seen by the many streams we received. Exactly what variants of options got the attention? Apparently mostly call options with strike prices around 695. Here's the count of stream data we got from Nvidia-options:
 \
 
 
@@ -415,8 +421,10 @@ Let's split the many streams we got from Nvidia a bit further. Here's boxplots o
 All values have a central tendency -- with some pretty big outliers. Note also, that ask prices tend to be a bit higher than bid prizes. That sounds natural, but maybe a viable strategy is in fact to continuously place buy or sell orders with prizes as slightly low or high, in the hopes that someone will bite?
 
 ```{r}
+#| column: page-right
+#| fig-width: 10
 plot_data <- streams |> 
-  filter(Description == "NVidia Corp.") |> 
+  filter(Description == "NVidia Corp.", PutCall == "Call") |> 
   pivot_longer(cols = c(msg_Quote_Ask, msg_Quote_AskSize, 
                         msg_Quote_Bid, msg_Quote_BidSize, msg_Quote_Mid), 
                       names_to = "metric", values_to = "value") |> 
@@ -425,11 +433,11 @@ plot_data <- streams |>
                                  TRUE ~ "Price"))
 
 plot_data |> 
-  ggplot(aes(x = metric, y = value)) +
+  ggplot(aes(x = metric, y = value, color = as.character(Expiry))) +
   facet_wrap(facets = vars(metric_type), scales = "free") +
   geom_boxplot() +
   labs(title = "Streaming ask/bid prizes and ask/bid sizes for for Nvidia call options",
-       subtitle = "Expiry: 2024-03-15, strike: 695")
+       color = "Expiry date")
 ```
 
 Let's have a closer look at the extreme outlier, where someone (but not nesscarity a single investor) tried  to buy more than 600 contracts (each of 100 shares, I guess) of Nvidia call options.
@@ -450,12 +458,14 @@ Do prices and bids correlate; i.e. when a lot of people want to buy Nvidia, do t
 
 ```{r}
 cor_data <- streams |> 
-  filter(Description == "NVidia Corp.") |> 
+  filter(Description == "NVidia Corp.", PutCall == "Call") |> 
   select(Ask = msg_Quote_Ask, AskSize= msg_Quote_AskSize, 
-         Bid = msg_Quote_Bid, BidSize = msg_Quote_BidSize, Mid = msg_Quote_Mid) |> 
+         Bid = msg_Quote_Bid, BidSize = msg_Quote_BidSize, Mid = msg_Quote_Mid,
+         Expiry, PutCall) |> 
   mutate(across(everything(), \(x) x))
 
 cor_data |> 
+  select(where(is.numeric)) |> 
   cor(use = "pairwise") |> 
   round(2)
 ```
@@ -464,6 +474,7 @@ Try to log everything; pretty much same picture:
 
 ```{r}
 cor_data |> 
+  select(where(is.numeric)) |> 
   mutate(across(everything(), \(x) log(x))) |> 
   cor(use = "pairwise") |> 
   round(2)
@@ -477,16 +488,15 @@ For sake of completeness, let's do a plot also:
 
 ```{r}
 cor_data |> 
-  mutate(color = BidSize == max(BidSize, na.rm = T)) |> 
-  ggplot(aes(x = BidSize, y = Bid, color = color), show.legend = F) +
-  geom_jitter(size = 1, show.legend = F) +
-  scale_colour_manual(values = c("black", "red")) +
-  geom_smooth(show.legend = F, color = "blue") +
+  mutate(Outlier = BidSize == max(BidSize, na.rm = T),
+         Expiry = as.character(Expiry)) |> 
+  ggplot(aes(x = BidSize, y = Bid, shape = Outlier, color = Expiry), show.legend = F) +
+  geom_jitter(size = 1, show.legend = T) +
+  geom_smooth(show.legend = F) +
   scale_x_log10() +
-  labs(title = "Streaming bid prizes and bid sizes for for Nvidia call options",
-      subtitle = "Expiry: 2024-03-15, strike: 695")
+  labs(title = "Streaming bid prizes and bid sizes for for Nvidia call options")
 ```
-It actually does look like the big bid for Nvidia call options (red dot) was offered at a relatively high price.
+It actually does look like the big bid for Nvidia call options (triangle dot) was offered at a relatively high price.
 
 How profitable was it, on 2024-02-23, to buy Nvidia call options at 113 USD with a strike price of 695, expiry date 2024-03-15? Here's the latest price data we collected:
 
