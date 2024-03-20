@@ -58,8 +58,8 @@ This is a quick look at the data on stock options harvested by `pywood`.
 
 ### How many stock options do we have in the snapshots?
 
-I.e. how many do we attempt to collect streaming prices for? Each file listed below covers a number of stock options, picked and sampled from the large *option space* of 
-all stock options.
+I.e. how many do we attempt to collect streaming prices for? Each file listed below covers a number of stock options, picked and/or sampled from the large *option space* of 
+*all* stock options. They are picked in slightly different ways, so overlap a lot but do not cover identical sets of stock options.
 
 ```{r}
 snaps |> count(file = file.x) |> arrange(desc(file))
@@ -204,20 +204,17 @@ moneyness %>%
        subtitle = "Looks like call options do much better than put?")
 ```
 
-### From moneyness to return
+### All options with snapshot prices
 
-How much money would we have made if we bought the *whole* option space for calls? Let's use snapshots (most recently traded prices) for this. However, since:
-
-  a) We only have snapshots for samples from the space, and 
-  b) Most options in the huge space are not traded
+It's not enough that an option is 'in the money' for it to be profitable. That depends on how expensive it was. Let's try to take the price of options into consideration. We don't have prices for all, so let's use the snapshot prices (most recently traded prices) that we got for a *subset* from the full option space, keeping in mind that we got a relatively small subset, since we focused on expiry dates in the near future, and strike prices near the median.
   
-We only have snapshot prices for relatively few stock options. But if we take what we have (and remember to update this when we have more data), we get:
+Looking at all snapshot prices for call options we get:
 
 ```{r}
 profit <- moneyness |> 
   filter(PutCall == "Call") |> 
   left_join(snaps, by = c("Uic" = "ReferenceId")) |> 
-  select(Description.x, moneyness, Snapshot.Quote.Mid) |> 
+  select(Description.x, Description.y, moneyness, Snapshot.Quote.Mid) |> 
   filter(!is.na(Snapshot.Quote.Mid))
 
 profit |> 
@@ -229,9 +226,9 @@ profit |>
 
 ```
 
-While this looks nice, it's still based on buying all call options in a marked where prices are rising, so we kind of already 'guessed' what market we're in.
+While this is interesting, it's still based on buying all call options in a marked where prices are rising, so we kind of already 'guessed' what market we're in.
 
-### Split by whether we got streaming data or not
+### Split moneyness by presence of streaming data
 
 Funny enough, it looks like the options for which we received streaming data (i.e. they are being traded), perform *worse* that the (much bigger) whole population of stock options:
 
@@ -243,8 +240,6 @@ moneyness |>
             mean_moneyness = mean(moneyness),
             median_moneyness = median(moneyness))
 ```
-
-**We should run this again when we have moneyness for more options -- when more are past expiry date**
 
 Checking if this is also true if we ignore big values, and only look at moneyness within ±100:
 
@@ -324,6 +319,8 @@ spaces |> count(ExchangeId = Exchange.ExchangeId)
 
 Yes, the most action seems to be around the 'neutral' current stock price. Note that call options tend to ask for lower strike prices, put options a bit higher, which makes sense.
 
+Note also, that we got a lot more streaming data for call options that for put. Do people like calls better? Are good news more easily leaked that bad?
+
 ```{r}
 strike_ranks <- spaces |> 
   group_by(UnderlyingUic, PutCall, Expiry) |> 
@@ -373,7 +370,7 @@ streams |>
 - Ask and bid prices in the streaming data seem to fluctuate quite a bit.
 - Maybe a reasonable starting *trade* strategy is to just buy any call options that we can get cheaply: Offer a lowish price and see if anyone bites. 
 - A possible *monitoring* strategy is to repeatedly collect different samples to monitor, then keep track of those that generate streams.
-- Or just do a lot of samples from call options with earliest expiry, and median strike price.
+- Or just do all call options with earliest expiry, and median strike price -- this comes to about 1,200-1,400 options, which seems to be okay.
 
 ## Appendices
 
